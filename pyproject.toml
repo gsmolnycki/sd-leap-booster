@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "sd-leap-booster"
+version = "0.1.0"
+description = "Stable Diffusion LEAP - Fast finetuning using a booster model that puts the initial state to a local minimum"
+authors = ["Peter Willemsen <peter@codebuffet.co>"]
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu117"
+default = false
+secondary = true
+
+[tool.poetry.dependencies]
+python = ">=3.9, <3.11"
+rich = { version = "*", source = "pypi" }
+tqdm = { version = "*", source = "pypi" }
+torch = { version = "*", source = "pytorch" }
+torchvision = { version = "*", source = "pytorch" }
+torchmetrics = { version = "*", source = "pypi" }
+pytorch-lightning = { version = "*", source = "pypi" }
+imgaug = { version = "*", source = "pypi" }
+numpy = { version = "*", source = "pypi" }
+Pillow = { version = "*", source = "pypi" }
+safetensors = { version = "*", source = "pypi" }
+einops = { version = "*", source = "pypi" }
+accelerate = { version = "*", source = "pypi" }
+datasets = { version = "*", source = "pypi" }
+diffusers = { version = "*", source = "pypi" }
+transformers = { version = "*", source = "pypi" }
+huggingface-hub = { version = "*", source = "pypi" }
+xformers = { version = "^0.0.15", source = "pypi", allow-prereleases = true }
+triton = { version = "^1.2.0", source = "pypi", allow-prereleases = true }
+packaging = { version = "*", source = "pypi" }
+nltk = { version = "*", source = "pypi" }
+iteration-utilities = { version = "*", source = "pypi" }
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

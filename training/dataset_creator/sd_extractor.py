@@ -4,17 +4,21 @@ import torch
 import gc
 import os
 import nltk
-import random
 import unicodedata
 import re
 import argparse
 from nltk.corpus import stopwords
+from tqdm.rich import tqdm
+from iteration_utilities import grouper
 
 file_path = os.path.abspath(os.path.dirname(__file__))
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--pretrained_model_name_or_path", type=str, default="stabilityai/stable-diffusion-2-1-base")
+    parser.add_argument("--images_per_prompt", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--use_cpu", type=bool, action=argparse.BooleanOptionalAction)
     parser.add_argument("--output_folder", type=str, default=os.path.join(file_path, "sd_extracted"))
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=512)
@@ -31,25 +35,38 @@ def slugify(value):
     return re.sub('[-\s]+', '-', value)
 
 imagenet_templates_small = [
-    "{}, realistic photo",
-    "{}, realistic render",
-    "{}, painting",
+    "{}, DLSR photo",
+    "{}, 3D render",
+    "{}, pencil drawing",
+    "{}, watercolor painting",
+    "{}, oil painting",
     "{}, anime",
-    "{}, greg ruthkowski",
     "{}, cartoon",
+    "{}, comic book",
+    "{}, line art",
     "{}, vector art",
-    "{}, clip art"
+    "{}, clip art",
+    "{}, sculpture",
+    "{}, digital painting"
 ]
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     nltk.download('stopwords')
     model_id_or_path = args.pretrained_model_name_or_path
-    pipeline = StableDiffusionPipeline.from_pretrained(
-        model_id_or_path,
-        revision="fp16",
-        torch_dtype=torch.float16,
-    )
+    if args.use_cpu:
+        pipeline = StableDiffusionPipeline.from_pretrained(
+            model_id_or_path,
+            torch_dtype=torch.float32,
+        )
+        pipeline = pipeline.to("cpu")
+    else:
+        pipeline = StableDiffusionPipeline.from_pretrained(
+            model_id_or_path,
+            revision="fp16",
+            torch_dtype=torch.float16,
+        )
+        pipeline = pipeline.to("cuda")
     tokenizer = CLIPTokenizer.from_pretrained(
         model_id_or_path,
         subfolder="tokenizer",
@@ -58,10 +75,7 @@ if __name__ == "__main__":
         model_id_or_path, subfolder="text_encoder"
     )
     token_embeds = text_encoder.get_input_embeddings().weight.data
-    def dummy(images, **kwargs):
-        return images, False
-    # pipeline.safety_checker = dummy
-    pipeline = pipeline.to("cuda")
+    pipeline.set_progress_bar_config(disable=True)
     stopwords_english = stopwords.words('english')
     tokens_to_search = []
 
@@ -80,11 +94,10 @@ if __name__ == "__main__":
 
         if len(token_name) > 3 and token_name.isalnum() and not token_name in stopwords_english and token_name in common_english_words:
             tokens_to_search.append(token_name)
+    
+    tokens_to_search = sorted(list(set(tokens_to_search)))
 
-    random.seed(80085)
-    random.shuffle(tokens_to_search)
-
-    for token_idx, token_name in enumerate(tokens_to_search):
+    for token_idx, token_name in enumerate(tqdm(tokens_to_search, desc="Extracting tokens")):
         token_id = tokenizer.encode(token_name, add_special_tokens=False)
         if len(token_id) > 1:
             raise Exception("Need single token!")
@@ -93,23 +106,26 @@ if __name__ == "__main__":
             token_type = "val"
         image_output_folder = os.path.join(args.output_folder, token_type, token_name)
         if os.path.exists(image_output_folder):
-            print(f"Skipping {image_output_folder} because it already exists")
+            tqdm.write(f"Skipping {image_output_folder} because it already exists")
             continue
         learned_embeds = token_embeds[token_id][0]
         concept_images_folder = os.path.join(image_output_folder, 'concept_images')
         os.makedirs(concept_images_folder, exist_ok = True)
         learned_embeds_dict = {token_name: learned_embeds.detach().cpu()}
         torch.save(learned_embeds_dict, os.path.join(image_output_folder, "learned_embeds.bin"))
-        images_per_prompt = 2
-        for image_idx in range(images_per_prompt):
-            for text in imagenet_templates_small:
-                text = text.format(token_name)
-                print(f"Doing {token_name} with prompt: '{text}'...")
-                image = pipeline(
-                    text,
-                    num_inference_steps=50,
-                    guidance_scale=9,
-                    width=args.width,
-                    height=args.height
-                ).images[0]
-                image.save(os.path.join(concept_images_folder, f"image_{slugify(text)}_{image_idx}.png"))
+        
+        prompts = []
+        for text in imagenet_templates_small:
+            prompts.append(text.format(token_name))
+        prompts *= args.images_per_prompt
+        
+        for promptGroup in grouper(prompts, args.batch_size):
+            tqdm.write("Inferring prompts: {}".format(" ".join(["\"" + str(prompt) + "\"," for prompt in promptGroup])[:-1].strip()))
+            images = pipeline(list(promptGroup), num_inference_steps=50, guidance_scale=9, width=args.width, height=args.height).images
+            for n, image in enumerate(zip(images, promptGroup)):
+                image[0].save(os.path.join(concept_images_folder, "image_{}_{}.png".format(slugify(image[1]), n)))
+
+
+if __name__ == "__main__":
+    main()
+
